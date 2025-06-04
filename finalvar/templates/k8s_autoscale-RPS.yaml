@@ -93,88 +93,100 @@ data:
         }
     }
 ---
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: nginx-exporter
-  annotations: 
-    prometheus.io/scrape: "true"
-    prometheus.io/port: "9113"
-spec:
-  selector:
-    matchLabels:
-      app: nginx-exporter
-  strategy:
-    type: Recreate
-  template:
-    metadata:
-      annotations:
-        prometheus.io/scrape: "true"
-        prometheus.io/port: "9113"
-      labels:
-        app: nginx-exporter
-    spec:
-      containers:
-      - image: nginx/nginx-prometheus-exporter:1.4.2
-        name: nginx-exporter
-        args:
-          - "--nginx.scrape-uri=http://nginx/api/metrics"
-        ports:
-        - containerPort: 9113
+#apiVersion: apps/v1
+#kind: Deployment
+#metadata:
+#  name: nginx-exporter
+#  annotations: 
+#    prometheus.io/scrape: "true"
+#    prometheus.io/port: "9113"
+#spec:
+#  selector:
+#    matchLabels:
+#      app: nginx-exporter
+#  strategy:
+#    type: Recreate
+#  template:
+#    metadata:
+#      annotations:
+#        prometheus.io/scrape: "true"
+#        prometheus.io/port: "9113"
+#      labels:
+#        app: nginx-exporter
+#    spec:
+#      containers:
+#      - image: nginx/nginx-prometheus-exporter:1.4.2
+#        name: nginx-exporter
+#        args:
+#          - "--nginx.scrape-uri=http://nginx/api/metrics"
+#        ports:
+#        - containerPort: 9113
 ---
-apiVersion: v1
-kind: Service
-metadata:
-  name: nginx-exporter
-  annotations:
-    meta.helm.sh/release-name: prometheus
-    meta.helm.sh/release-namespace: default
-    prometheus.io/scrape: "true"
-    #prometheus.io/probe: "true"
-spec:
-  type: ClusterIP
-  selector:
-    app: nginx-exporter
-  ports:
-    - name: http
-      port: 9113
-      targetPort: 9113
-
-
+#apiVersion: v1
+#kind: Service
+#metadata:
+#  name: nginx-exporter
+#  annotations:
+#    meta.helm.sh/release-name: prometheus
+#    meta.helm.sh/release-namespace: default
+#    prometheus.io/scrape: "true"
+#    #prometheus.io/probe: "true"
+#spec:
+#  type: ClusterIP
+#  selector:
+#    app: nginx-exporter
+#  ports:
+#    - name: http
+#      port: 9113
+#      targetPort: 9113
+#
+#
 ---
 ### Deployment
 apiVersion: apps/v1
 kind: Deployment
 metadata:
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "9113"
   name: nginx
   labels:
-    app: nginx
+    app: nginx-exporter
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: nginx
+      app: nginx-exporter
   template:
     metadata:
-      name: nginx
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9113"
+      name: nginx-exporter
       labels:
-        app: nginx
-        serv: nginx-k
+        app: nginx-exporter
+        #serv: nginx-k
     spec:
-      affinity:
-        podAntiAffinity:
-          requiredDuringSchedulingIgnoredDuringExecution:
-            - labelSelector:
-                matchExpressions:
-                  - key: app
-                    operator: In
-                    values:
-                      - nginx
-              topologyKey: "kubernetes.io/hostname"
-
+#      affinity:
+#        podAntiAffinity:
+#          requiredDuringSchedulingIgnoredDuringExecution:
+#            - labelSelector:
+#                matchExpressions:
+#                  - key: app
+#                    operator: In
+#                    values:
+#                      - nginx
+#              topologyKey: "kubernetes.io/hostname"
+#
       containers:
+      - name: nginx-exporter
+        image: nginx/nginx-prometheus-exporter:1.4.2
+        args:
+          - "--nginx.scrape-uri=http://localhost/api/metrics"
+        ports:
+        - containerPort: 9113
+        #####333
       - name: nginx
-#        image: k8s.gcr.io/hpa-example
         image: nginx
         ports:
         - containerPort: 80
@@ -233,6 +245,26 @@ spec:
               path: red/index.html
 
 ---
+## service for node exporter
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx-exporter
+  annotations:
+    meta.helm.sh/release-name: prometheus
+    meta.helm.sh/release-namespace: default
+    prometheus.io/scrape: "true"
+    #prometheus.io/probe: "true"
+spec:
+  type: ClusterIP
+  selector:
+    app: nginx-exporter
+  ports:
+    - name: http
+      port: 9113
+      targetPort: 9113
+
+---
 ### Service
 apiVersion: v1
 kind: Service
@@ -240,7 +272,7 @@ metadata:
   name: nginx
 spec:
   selector:
-    app: nginx
+    app: nginx-exporter
   ports:
     - protocol: TCP
       port: 80
@@ -254,8 +286,8 @@ spec:
   scaleTargetRef:
     apiVersion: apps/v1
     kind: Deployment
-    #name: nginx-exporter
-    name: nginx
+    name: nginx-exporter
+    #name: nginx
   minReplicas: 1
   maxReplicas: 10
   metrics:
