@@ -83,6 +83,7 @@ prometheus-adapter:
        #name:
        #  matches: ""
        #  as: "my_custom_metric"
+       metricsQuery: sum(rate(<<.Series>>[5m]))
        metricsQuery: sum(rate(<<.Series>>{<<.LabelMatchers>>}[5m]))
     # Mounts a configMap with pre-generated rules for use. Overrides the
     # default, custom, external and resource entries
