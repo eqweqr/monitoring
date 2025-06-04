@@ -1,0 +1,285 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nginx-conf
+data:
+  red.html: |
+    <style>
+    html{
+      background-color: red;
+    }
+    </style>
+  blue.html: |
+    <style>
+    html{
+      background-color: blue;
+    </style>
+  index.html: |
+    <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+    </head>
+    <body>
+      <p>Главная страница</p>
+      <ul>
+      <li><a href="http://leohoyt.zapto.org:31024/google">redirect google</a></li>
+      <li><a href="http://leohoyt.zapto.org:31024/color/">Цвета</a></li>
+      </ul>
+    </body>
+  nginx.conf: |
+    worker_processes auto;
+    pid        /tmp/nginx.pid;
+    events {
+      worker_connections  1024;
+    }
+    http {
+      log_format main '$remote_addr - $remote_user [$time_local] "$request" $status $body_bytes_sent "$http_referer" "$http_user_agent" "$request_time"';
+      access_log  /var/log/nginx/access.log main;
+
+      upstream colors {
+        server 127.0.0.1:8080;
+        server 127.0.0.1:8081;
+      }
+
+      server {
+        listen 8081;
+        root /var/www/html/blue;
+        index index index.html;
+        server_name exa.com;
+        location / {
+
+        }
+       }
+
+      server {
+        listen 8080;
+        root /var/www/html/red;
+        index index index.html;
+        server_name ex.com;
+        location / {
+
+        }
+      }
+
+      server {
+          listen 80;
+          root /var/www/html;
+          index index index.html;
+          server_name example.com;
+          location /api {
+            root /var/www/html;
+            try_files /index.html =404;
+          index index index.html;
+          }
+          location /api/color/ {
+            auth_basic "Authentication!";
+            auth_basic_user_file /var/auth/.htpasswd;
+            proxy_pass http://colors/;
+          }
+          location /api/metrics {
+            stub_status;
+          }
+          location /pass {
+              proxy_set_header Host $host;
+              proxy_set_header X-Real-IP $remote_addr;
+          }
+          location /api/google {
+            return      301 https://google.com;
+          }
+          location /health{
+                add_header Content-Type text/plain;
+                return 200 'no content';
+          }
+        }
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx-exporter
+  annotations: 
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "9113"
+spec:
+  selector:
+    matchLabels:
+      app: nginx-exporter
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9113"
+      labels:
+        app: nginx-exporter
+    spec:
+      containers:
+      - image: nginx/nginx-prometheus-exporter:1.4.2
+        name: nginx-exporter
+        args:
+          - "--nginx.scrape-uri=http://nginx/api/metrics"
+        ports:
+        - containerPort: 9113
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx-exporter
+  annotations:
+    meta.helm.sh/release-name: prometheus
+    meta.helm.sh/release-namespace: default
+    prometheus.io/scrape: "true"
+    #prometheus.io/probe: "true"
+spec:
+  type: ClusterIP
+  selector:
+    app: nginx-exporter
+  ports:
+    - name: http
+      port: 9113
+      targetPort: 9113
+
+
+---
+### Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx
+  labels:
+    app: nginx
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nginx
+  template:
+    metadata:
+      name: nginx
+      labels:
+        app: nginx
+        serv: nginx-k
+    spec:
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchExpressions:
+                  - key: app
+                    operator: In
+                    values:
+                      - nginx
+              topologyKey: "kubernetes.io/hostname"
+
+      containers:
+      - name: nginx
+#        image: k8s.gcr.io/hpa-example
+        image: nginx
+        ports:
+        - containerPort: 80
+        volumeMounts:
+        - mountPath: /etc/nginx
+          readOnly: true
+          name: nginx-conf
+        - mountPath: /var/www/html
+          readOnly: true
+          name: html
+        resources:
+          limits:
+            cpu: 75m
+          requests:
+            cpu: 50m
+        startupProbe:
+          httpGet:
+            path: /health
+            port: 80
+          failureThreshold: 2
+          periodSeconds: 3
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 80
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 3
+          successThreshold: 1
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 80
+          initialDelaySeconds: 4
+          periodSeconds: 5
+          timeoutSeconds: 3
+          successThreshold: 1
+          failureThreshold: 3
+      volumes:
+      - name: nginx-conf
+        configMap:
+          name: nginx-conf
+          items:
+            - key: nginx.conf
+              path: nginx.conf
+      - name: html
+        configMap:
+          name: nginx-conf
+          items:
+            - key: index.html
+              path: index.html
+            - key: blue.html
+              path: blue/index.html
+            - key: red.html
+              path: red/index.html
+
+---
+### Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx
+spec:
+  selector:
+    app: nginx
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 80
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: nginx
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: nginx-exporter
+  minReplicas: 1
+  maxReplicas: 10
+  metrics:
+    - type: Pods
+      pods:
+        metric:
+          name: nginx_http_requests
+#          name: nginx_http_requests
+        target:
+          type: AverageValue
+          averageValue: 2
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: prometheus-service
+spec:
+  type: NodePort
+  selector:
+    app.kubernetes.io/component: server
+    app.kubernetes.io/name: prometheus
+    app.kubernetes.io/part-of: prometheus
+    #pod-template-hash: 66686f47b
+  ports:
+    - name: http
+      port: 9090
+      # targetPort: 80
+      nodePort: 31024
