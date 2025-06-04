@@ -149,7 +149,7 @@ metadata:
   annotations:
     prometheus.io/scrape: "true"
     prometheus.io/port: "9113"
-  name: nginx
+  name: nginx-exporter
   labels:
     app: nginx-exporter
 spec:
